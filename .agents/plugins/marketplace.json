@@ -1,10 +1,10 @@
 {
-  "name": "beebot",
-  "interface": {"displayName": "BeeBot"},
+  "name": "beeloop-state",
+  "interface": {"displayName": "BeeLoop State"},
   "plugins": [
     {
-      "name": "beebot-state",
-      "source": {"source": "local", "path": "./plugins/state"},
+      "name": "beeloop-state",
+      "source": {"source": "local", "path": "./plugins/beeloop-state"},
       "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
       "category": "Productivity"
     }

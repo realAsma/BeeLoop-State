@@ -1,18 +1,10 @@
-"""State MCP Server — long-term state for long-running work.
+"""MCP server for long-term work state.
 
 Tools:
-  state_get             — the whole record for one work item
-  state_index_search    — index rows only: time, state, place. One read.
-  state_initialize      — file a new work item. Structure only.
-  state_update          — all content, in one call. Refused on a stale read.
+  state_get, state_index_search, state_initialize, state_update
 
-A record is keyed by (cwd, work_name), so every tool but the search takes both.
-
-None of the tools spawn a model.
-
-Also `--validate`, which re-checks the whole store and exits. Not a tool: it
-adjudicates hand-edits, which is not a thing an agent mid-work should be asked
-to do.
+Records are keyed by (cwd, work_name); only search does not require both. Tools
+never spawn a model. `--validate` re-checks the store and exits.
 """
 
 import argparse
@@ -57,23 +49,18 @@ UPDATE = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                          idempotentHint=False, openWorldHint=False)
 mcp = FastMCP("state", instructions="""Long-term state for long-running work.
 
-A work item is one index row (identity, time, place, one-line summary) plus one
-file of prose (status, prior actions, next steps, blockers, artifacts). The row
-is what you search; the file is what you read once you have chosen.
+A work item has a searchable index row and a prose work file.
 
-A record is keyed by (cwd, work_name): a name only has to be unique in the
-directory the work runs in, so both are needed to read or write one.
+Records are keyed by (cwd, work_name); a name is unique only within its cwd.
 
-TO FIND YOUR OWN WORK, use the mechanical search first:
-    state_index_search(cwd="<the directory you are working in>", completion="open")
-Pick by short_description, then state_get it. Use state-ask only if candidates
-remain ambiguous.
+Find your work by exact cwd first:
+    state_index_search(cwd="<the directory you are working in>", completion="open", limit=0)
+Complete state_index_search's index stage before state_get; use state-ask only
+if candidates remain ambiguous.
 
-TO WRITE: state_get returns the write_token that state_update requires. A stale
-token is refused, which stops two callers silently erasing each other.
+state_get returns the write_token required by state_update; stale tokens are refused.
 
-This store is written through these tools and never by hand. A hand-edit
-bypasses the schema, and a record that never met the schema can pass and lie.
+Write only through these tools. Hand edits bypass schema enforcement.
 """)
 
 # Set by main(); the tools are a thin shell over it.
@@ -84,12 +71,8 @@ STORE: Store = None  # type: ignore[assignment]
 def state_get(work_name: str, cwd: str) -> dict:
     """The whole record for one work item: work file fields plus the index row.
 
-    Reads are unrestricted, and nothing about ownership comes back -- whether
-    you SHOULD be working on it is an execution question answered elsewhere.
-
-    The returned `write_token` is the `updated` observed under the store's read
-    lock. It is neither a read timestamp nor an mtime, and is not separately
-    persisted. Pass it to a later state_update.
+    Reads are unrestricted and convey no ownership. Returns `updated` as the
+    `write_token` for state_update.
 
     Args:
         work_name: The work item to read.
@@ -110,15 +93,12 @@ def state_index_search(
 ) -> list[dict]:
     """Index rows, newest first. Never opens a work file -- one read.
 
-    Filters are mechanical: time, state, place. There is no content filter,
-    because content questions belong to the state-ask skill and a substring over
-    short_description only fires when you guess a word the writer used. Read
-    short_description and pick.
-
-    TO FIND YOUR OWN WORK: state_index_search(cwd=<your directory>,
-    completion="open"). Deterministic and cheap -- reaching for
-    state-ask to answer "which of these three am I on" delegates something a
-    filter already answered.
+    Recall has two stages. In the index stage, filter mechanically by time,
+    state, and place, then inspect every returned row before opening any record:
+    use `short_description` for relevance, `completion` for state, `updated` for
+    recency, and (`cwd`, `work_name`) for identity. Select every potentially
+    relevant row. In the record stage, call state_get for each selected
+    identity.
 
     Args:
         since: Lower bound on `updated`, inclusive. A duration like '7d'
@@ -128,12 +108,8 @@ def state_index_search(
             alone.
         completion: Filter to open or done work. This is the one-bit fact, not
             `current_status`, which is prose.
-        cwd: The working directory the work runs in. Optional HERE, and only
-            here, because this is a filter rather than a key. Matched exactly,
-            not by prefix -- a prefix would silently match a nested checkout.
-        limit: Caps the ROWS RETURNED; defaults to 20 because a client is
-            picking one item off a list. A SWEEP IS NOT -- pass limit=0. Silent
-            truncation manufactures a false "nothing found".
+        cwd: Exact working-directory filter, not a prefix.
+        limit: Maximum rows returned; pass 0 for an exhaustive sweep.
     """
     return STORE.search(Filters(since=since, until=until, completion=completion,
                                 cwd=cwd, limit=limit))
@@ -143,23 +119,14 @@ def state_index_search(
 def state_initialize(work_name: str, short_description: str, cwd: str) -> dict:
     """File a new work item and return its first `write_token`: STRUCTURE ONLY.
 
-    It takes exactly the fields the index row cannot be valid without;
-    everything else is content, and content has one writer -- call state_update
-    next to fill it in.
-
-    Fails if this cwd already has work by that name. The name is free in every
-    other directory, so it can describe the work rather than disambiguate it.
+    Call state_update next for content. Fails if the name exists in this cwd.
 
     Args:
         work_name: Names the work within `cwd`; those two together are the key.
             Lowercase-hyphenated is the convention. Also the filename stem, so
             no path separators and no leading '.', '_' or '-'.
-        short_description: One line, at most 120 characters. This is what makes
-            an index worth having -- the other fields narrow by time and place,
-            but choosing the right work item needs content.
-        cwd: The real working directory this work runs in. Required, and set
-            here or never: it is half the key, it is not writable afterwards,
-            and it is how the next agent in that directory finds this at all.
+        short_description: One-line summary, at most 120 characters.
+        cwd: The work's real directory; half the immutable key.
     """
     row = STORE.initialize(work_name, short_description, cwd)
     return {"work_name": row["work_name"], "cwd": row["cwd"],
@@ -183,14 +150,9 @@ def state_update(
 ) -> dict:
     """All content, in ONE call. Returns the new `updated` and `write_token`.
 
-    You never write either file directly and do not need to know which field
-    lives where. `updated` is always the server's, never a parameter -- which is
-    why the call returns it. Omitted fields are left alone; supplied list fields
-    are rewritten WHOLE, never appended to.
-
-    A write is refused for a stale or missing `write_token`, a schema violation,
-    an unknown field, or a work item that does not exist. If the token is stale,
-    re-read, merge, and retry.
+    Omitted fields remain unchanged; supplied lists replace the whole list.
+    Missing or stale tokens, schema violations, unknown fields, and nonexistent
+    work items are refused. For a stale token, re-read, merge, and retry.
 
     There is no delete. A work item becomes completion="done".
 
@@ -198,23 +160,22 @@ def state_update(
         work_name: The work item to write.
         cwd: The directory it runs in. Required: it is the other half of the
             key, so the same name in another directory is a different record.
-        write_token: The token returned by state_get or state_initialize.
-        description: What this is, and what done looks like. `completion` has to
-            be judged against something.
-        current_status: Where things stand right now.
-        prior_actions: What was attempted and how it turned out, short and
-            high-level. Dead ends are what an arriving agent would otherwise
-            rediscover. Rewritten whole.
-        next_steps: What to do now, concrete enough to start on.
-        blockers: What is stopping progress, and who or what is being waited on.
-        artifacts: [{"item": ..., "note": ...}]. Item is any durable reference:
-            a path, link, commit, or job ID.
-        final_learnings: Usually written once, at the end. A different audience
-            from prior_actions: that serves whoever picks THIS work up, this
-            serves whoever hits the same problem on other work. It is what
-            makes closed records worth keeping.
+        write_token: The latest token returned by state_get, state_initialize,
+            or state_update.
+        description: What the work is and what done looks like. Revise only if
+            the work changes.
+        current_status: The state of the world, not a summary of the session.
+        prior_actions: Brief attempts and outcomes, especially important dead
+            ends.
+        next_steps: Concrete enough for the next person to begin without asking
+            questions.
+        blockers: Who or what is being waited on.
+        artifacts: Needed paths, links, commits, or job IDs, each with a note.
+        final_learnings: Lessons for somebody facing the same problem on
+            different work, usually written at the end.
         completion: "open" or "done".
-        short_description: Replace the index one-liner. At most 120 characters.
+        short_description: Replace the index one-liner only when it no longer
+            fits the work. At most 120 characters.
     """
     given = {"description": description, "current_status": current_status,
              "prior_actions": prior_actions, "next_steps": next_steps,
@@ -227,16 +188,7 @@ def state_update(
 
 
 def prepare(states_dir: Path) -> Path:
-    """Make the data directory usable, wherever it is.
-
-    schema.json ships with the plugin but has to live beside the index so the
-    store can validate records. It is refreshed when the shipped copy differs;
-    the plugin version owns it, not the data directory.
-
-    The data directory is one host-independent place, outside any plugin cache,
-    so upgrading the plugin cannot strand or overwrite the records -- and so
-    work saved from one host is visible from the other.
-    """
+    """Prepare the shared external store and refresh its shipped schema."""
     states_dir.mkdir(parents=True, exist_ok=True)
     source, target = ASSETS / "schema.json", states_dir / "schema.json"
     if not target.exists() or not filecmp.cmp(source, target, shallow=False):
@@ -248,14 +200,7 @@ def prepare(states_dir: Path) -> Path:
 
 
 def _refuse_a_legacy_store(index: Path) -> None:
-    """A pre-3.0 store keyed rows on `task_name`. This directory is where such a
-    store already lives, so serving it would append `work_name` rows alongside
-    the old ones and leave a mixed-schema index that every later --validate
-    rejects. The tool names did not change, so nothing else would signal it.
-    Refuse instead: an empty or absent index passes trivially, so a fresh store
-    is unaffected, and this also covers the $BEEBOT_STATE_DIR or --states still
-    pointing at a legacy store somewhere else on disk.
-    """
+    """Refuse pre-3.0 `task_name` rows instead of creating a mixed store."""
     for line in index.read_text("utf-8").splitlines():
         if not line.strip():
             continue
@@ -273,11 +218,7 @@ def _refuse_a_legacy_store(index: Path) -> None:
 def resolve_states_dir(flag: Path | None) -> tuple[Path, str]:
     """--states, then $BEEBOT_STATE_DIR, then ~/.beebot_states.
 
-    Deliberately host-independent. Honouring a per-host data directory
-    (${PLUGIN_DATA}, ${CLAUDE_PLUGIN_DATA}) would fork the store in two: saved
-    under one host, invisible to the other. Falling back to the plugin's own
-    directory is worse still -- that is a version-stamped cache, and an
-    upgrade strands it.
+    Ignores per-host data directories so every host uses one external store.
     """
     if flag is not None:
         return _absolute(flag), "--states"

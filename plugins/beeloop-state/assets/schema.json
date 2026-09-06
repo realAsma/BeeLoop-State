@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beebot.local/state-store/schema.json",
+  "title": "BeeBot state store",
+  "description": "Startup schema for both record types; missing or invalid means every write is refused.",
+
+  "$defs": {
+    "work_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Filename-safe work name, unique together with cwd; keeps work_state_path inside states/."
+    },
+
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "Fixed-width ISO-8601 UTC seconds ending in 'Z'; lexical order is chronological."
+    },
+
+    "index_row": {
+      "type": "object",
+      "description": "One code-written row of states/index.jsonl: the recall fields needed without opening a work file.",
+      "additionalProperties": false,
+      "required": ["cwd", "work_name", "short_description", "updated", "completion", "work_state_path"],
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Required, immutable key half: the real work directory from which its bucket is derived."
+        },
+        "work_name": {
+          "$ref": "#/$defs/work_name",
+          "description": "Unique together with `cwd`. That pair is a cross-record invariant this schema cannot express; `validate` enforces it."
+        },
+        "short_description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "One-line recall summary, avoiding work-file reads during search."
+        },
+        "updated": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Server-assigned, strictly monotonic update time and stale-write token."
+        },
+        "completion": {
+          "enum": ["open", "done"],
+          "description": "The one-bit fact recall filters on. Not `current_status`, which is prose."
+        },
+        "work_state_path": {
+          "type": "string",
+          "pattern": "^[^/][^\\u0000]*/[^/\\u0000]+\\.json$",
+          "maxLength": 400,
+          "description": "Stored '<bucket>/<work_name>.json' path relative to states/, retained for compatibility if bucket naming changes. resolve_in_store enforces containment."
+        }
+      }
+    },
+
+    "work_file": {
+      "type": "object",
+      "description": "Agent-written content; the index row owns identity, location, and time.",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "description": {
+          "type": "string",
+          "maxLength": 6000,
+          "description": "What the work is and what done looks like."
+        },
+        "current_status": {
+          "type": "string",
+          "maxLength": 6000,
+          "description": "Where things stand right now."
+        },
+        "prior_actions": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1500},
+          "description": "Brief attempts and outcomes, especially dead ends. Replaces the whole list."
+        },
+        "next_steps": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1200},
+          "description": "What to do next. Replaces the whole list."
+        },
+        "blockers": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1200},
+          "description": "What is stopping progress. Replaces the whole list; normally empty."
+        },
+        "artifacts": {
+          "type": "array",
+          "maxItems": 50,
+          "description": "Durable references only; referenced content lives elsewhere.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["item"],
+            "properties": {
+              "item": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "description": "Any durable reference -- a path, link, commit, or job ID."
+              },
+              "note": {
+                "type": "string",
+                "maxLength": 600,
+                "description": "What it is and why it matters."
+              }
+            }
+          }
+        },
+        "final_learnings": {
+          "type": "string",
+          "maxLength": 12000,
+          "description": "Optional end-of-work lessons for similar work; prior_actions serves this work's successor."
+        }
+      }
+    }
+  }
+}

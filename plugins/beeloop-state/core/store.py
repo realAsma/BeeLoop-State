@@ -28,12 +28,7 @@ DIGEST_BYTES = 8  # of that budget, reserved for the cwd digest
 WORK_FILE_FIELDS = ("description", "current_status", "prior_actions",
                     "next_steps", "blockers", "artifacts", "final_learnings")
 INDEX_ROW_FIELDS = ("completion", "short_description")
-# The order a row is WRITTEN in, and the only thing that decides it. Not sorted:
-# index.jsonl is read by eye as well as by code, and this is the order the
-# fields are chosen in -- where the work runs, what it is called, what it is,
-# then when and how far along, with the filing detail last. schema.json lists
-# index_row's properties to match, for a reader, but order is invisible to a
-# validator, so that copy documents this one and cannot enforce it.
+# Written field order; schema.json cannot enforce JSON object order.
 INDEX_ROW_ORDER = ("cwd", "work_name", "short_description", "updated",
                    "completion", "work_state_path")
 # Identity and location are set at initialize; changing them is an admin
@@ -68,26 +63,13 @@ class UnsafePath(StoreError):
 
 
 def slug(cwd: str) -> str:
-    """A readable rendering of a NORMALIZED cwd, then a digest of the whole of
-    it. Normalize first, always: the digest is over the bytes it is handed, so
-    "/w" and "/w/" would otherwise be two buckets holding the same directory.
+    """Render a normalized cwd readably, then append its full-path digest.
 
         /home/ak/Bots/BeeBotBS  ->  home-ak-Bots-BeeBotBS-6f3a1c04
 
-    INJECTIVE, and that is load-bearing: files live at <slug(cwd)>/<name>.json
-    and a work_name is only unique within its cwd, so two cwds sharing a bucket
-    would let one record silently overwrite another. The readable half cannot
-    carry uniqueness on its own -- it is truncated, "/" flattens to "-", and the
-    leading strip collapses "/", "/_" and "/-" onto the same empty string -- so
-    the digest is unconditional, the _root fallback included. Case, dots and
-    spaces are left alone: this names a directory, not a URL.
-
-    The truncation is for NAME_MAX (one path component caps at 255 bytes, and a
-    cwd may be 4096) and never for uniqueness, which is why the digest is taken
-    over the FULL cwd rather than over what survives truncation -- digesting the
-    truncation would reintroduce exactly the collision the digest buys. Slicing
-    bytes and decoding with "ignore" means a cut through the middle of a UTF-8
-    sequence drops it rather than raising.
+    The readable prefix is flattened and truncated, so the unconditional digest
+    preserves collision resistance. It covers the full normalized cwd, not the
+    prefix. A split UTF-8 sequence is dropped while decoding the byte slice.
     """
     readable = cwd.strip("/").replace("/", "-").lstrip("_-")
     readable = readable.encode()[:MAX_BUCKET_BYTES - DIGEST_BYTES - 1].decode("utf-8", "ignore")
@@ -99,18 +81,14 @@ def work_state_path(work_name: str, cwd: str) -> str:
 
 
 def normalize_cwd(cwd: str) -> str:
-    """Absolute and unadorned, so two spellings of one directory group together
-    rather than splitting into two cwds. Required, never optional: cwd is half
-    the key, and a record with no place cannot be identified or found again."""
+    """Normalize the required cwd key half so equivalent spellings share identity."""
     if not cwd or not cwd.strip():
         raise StoreError("cwd is required: with work_name it is the key")
     return os.path.normpath(os.path.abspath(os.path.expanduser(cwd.strip()))).rstrip("/") or "/"
 
 
 def resolve_in_store(states_dir: Path, relative: str) -> Path:
-    """Structural rather than defensive: the only caller-supplied component is
-    work_name, which the schema constrains to a bare filename. This exists so a
-    hand-edited index cannot turn a read into an arbitrary-file read."""
+    """Keep even a hand-edited relative path contained in the store."""
     pure = PurePosixPath(relative)
     resolved = (states_dir / pure).resolve()
     # Structural (no empty path, no absolute, no "..") and positional (lands
@@ -133,9 +111,7 @@ def now() -> str:
 
 
 def resolve_bound(value: str | None) -> str | None:
-    """A since/until as an absolute stored timestamp: "7d" (s/m/h/d/w) or a
-    timestamp. Resolved before anything is filtered, so a bound is a concrete
-    instant by the time it is compared against rows."""
+    """Resolve a duration like "7d" (s/m/h/d/w) or timestamp to stored UTC."""
     if not value or not value.strip():
         return None
     value = value.strip()
@@ -153,10 +129,7 @@ def resolve_bound(value: str | None) -> str | None:
 
 
 def _next_after(previous: str | None) -> str:
-    """Strictly monotonic per work item. `updated` is also the token a stale write is
-    refused against, so a non-increasing stamp would make a lost update
-    undetectable -- and two writes inside one second would produce exactly
-    that."""
+    """Return a strictly increasing update time so stale-token checks stay sound."""
     current = now()
     if previous and current <= previous:
         return (dt.datetime.strptime(previous, STAMP) + dt.timedelta(seconds=1)).strftime(STAMP)
@@ -176,10 +149,7 @@ class Filters:
 
 
 class Store:
-    """Every write is checked against schema.json before anything touches disk,
-    and NOTHING IS EVER TRUNCATED OR COERCED: silently trimming a description
-    produces a record that passes and lies, refusing produces one that never
-    exists. Fails closed -- a broken or missing schema refuses every write."""
+    """Validate every write without coercion; an unusable schema prevents loading."""
 
     def __init__(self, states_dir: Path | str):
         self.dir = Path(states_dir).resolve()
@@ -206,8 +176,7 @@ class Store:
     # -------------------------------------------------------------- reading
 
     def read_index(self) -> list[dict[str, Any]]:
-        """Every row, newest first, ties broken by work_name. One read of one
-        file -- this is the recall path and no work file is opened on it."""
+        """Read every index row newest first, breaking ties by work_name."""
         rows = []
         for number, line in enumerate(self.index_path.read_text("utf-8").splitlines(), 1):
             if line.strip():
@@ -218,16 +187,8 @@ class Store:
         rows.sort(key=_by_recency, reverse=True)
         return rows
 
-    def row(self, work_name: str, cwd: str) -> dict[str, Any]:
-        return _row_in(self.read_index(), work_name, normalize_cwd(cwd))
-
     def get(self, work_name: str, cwd: str) -> dict[str, Any]:
-        """The whole record: work file fields plus the index row, merged, so
-        callers never see the split. Nothing about ownership comes back --
-        whether an agent SHOULD be working an item is answered elsewhere.
-
-        The index row and work file are read under one shared lock, so the
-        merged record is a consistent snapshot."""
+        """Read a consistent, merged snapshot without conveying ownership."""
         cwd = normalize_cwd(cwd)
         with self._locked(shared=True):
             row = _row_in(self.read_index(), work_name, cwd)
@@ -239,13 +200,7 @@ class Store:
             return {**json.loads(path.read_text("utf-8")), **_public(row)}
 
     def search(self, filters: Filters) -> list[dict[str, Any]]:
-        """Index rows only, newest first. Mechanical: time, state, place.
-
-        No content filter -- matching prose belongs to state-ask, and
-        a substring over short_description only fires when the caller guesses a
-        word the writer used, missing silently the rest of the time, which is
-        the one thing a recall path must not do.
-        """
+        """Filter newest-first index rows mechanically by time, state, and place."""
         since, until = resolve_bound(filters.since), resolve_bound(filters.until)
         # The one place cwd stays optional: here it is a filter, not a key.
         cwd = normalize_cwd(filters.cwd) if filters.cwd and filters.cwd.strip() else None
@@ -273,10 +228,7 @@ class Store:
 
     def initialize(self, work_name: str, short_description: str,
                    cwd: str) -> dict[str, Any]:
-        """STRUCTURE ONLY: bucket, empty work file, index row. It takes exactly
-        the fields the row cannot be valid without; everything else is content,
-        and content has one writer. So no field is ever "create-only", and
-        adding one to the work record changes the schema and nothing else."""
+        """Create the bucket, empty work file, and index row only."""
         cwd = normalize_cwd(cwd)
         row = {"cwd": cwd,
                "work_name": work_name,
@@ -300,16 +252,10 @@ class Store:
 
     def update(self, work_name: str, cwd: str, fields: dict[str, Any],
                expected: str | None = None) -> str:
-        """ALL content, ONE call, TWO files. Returns the new `updated` -- the
-        caller's next freshness token.
+        """Update content across both files and return the next freshness token.
 
-        Write order is work file first, then the index row. A crash between
-        them leaves content saved with a stale `updated`, which is recoverable;
-        the reverse would advertise a version of a file that was never written.
-
-        `expected` is the `updated` the caller last read. Compared INSIDE the
-        lock, because comparing outside it lets two writers both pass and then
-        serialize, the second erasing the first. None skips the check.
+        The recoverable write order is work file then index. `expected`, when
+        given, is compared with the last `updated` inside the lock.
         """
         if unknown := [k for k in fields
                        if k not in WORK_FILE_FIELDS and k not in INDEX_ROW_FIELDS]:
@@ -348,9 +294,7 @@ class Store:
     # ------------------------------------------------------------ validating
 
     def validate(self) -> list[str]:
-        """Re-check the whole store, catching what the write path cannot: rows
-        written before a rule existed, hand-edits, and the cross-record
-        invariants schema.json has no way to express."""
+        """Check existing data and cross-record invariants."""
         problems, seen, filed, known = [], set(), set(), set()
         for row in self.read_index():
             name = row.get("work_name", "<unnamed row>")
@@ -359,16 +303,12 @@ class Store:
             except Invalid as exc:
                 problems.append(f"index row {name}: {exc}")
                 continue
-            # Enforced, never trusted: nothing structurally prevents a
-            # collision, and a duplicate silently makes one of the two
-            # unreachable.
+            # A duplicate key silently makes one record unreachable.
             where = (normalize_cwd(row["cwd"]), name)
             if where in seen:
                 problems.append(f"index row {name}: (cwd, work_name) is not unique")
             seen.add(where)
-            # Checked directly rather than inferred from the key: this is the
-            # invariant that actually stops one record overwriting another's
-            # file, and it would also catch a slug that stopped being injective.
+            # A duplicate path lets one record overwrite another.
             if row["work_state_path"] in filed:
                 problems.append(f"index row {name}: work_state_path is not unique")
             filed.add(row["work_state_path"])
@@ -386,20 +326,15 @@ class Store:
     # ---------------------------------------------------------------- private
 
     def _file(self, row: dict[str, Any]) -> Path:
-        """Where a row's work file is. Always through resolve_in_store, never by
-        joining: the row may have been hand-edited, and this is the only step
-        between what it says and an open()."""
+        """Resolve a possibly hand-edited row's path safely inside the store."""
         return resolve_in_store(self.dir, row["work_state_path"])
 
     @contextmanager
     def _locked(self, shared: bool = False):
         """Coordinate readers and writers around a consistent store snapshot.
 
-        "a+", never "w": NFS emulates flock with POSIX record locks, where
-        LOCK_SH needs a descriptor open for READING. On a write-only fd it
-        fails with EBADF while LOCK_EX succeeds, so only readers break and
-        only on a network mount. "a+" also stops truncating a file whose
-        bytes nobody ever reads, once per acquisition.
+        Use "a+": NFS LOCK_SH requires a readable descriptor, and this mode
+        does not truncate the lock file.
         """
         with open(self.dir / ".lock", "a+") as handle:
             fcntl.flock(handle, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
@@ -409,26 +344,19 @@ class Store:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     def _write_index(self, rows: list[dict[str, Any]]) -> None:
-        """Oldest first on disk, exactly the reverse of the read order: same key,
-        so the file a human opens and the list an agent gets back cannot drift
-        into two different notions of order, and a rewrite that changed nothing
-        produces no diff."""
+        """Write oldest first, reversing the same total order used for reads."""
         _write(self.index_path, "".join(
             json.dumps(_ordered(r), ensure_ascii=False) + "\n"
             for r in sorted(rows, key=_by_recency)))
 
 
 def _by_recency(row: dict[str, Any]) -> tuple[str, str]:
-    """Total, and total on purpose: `updated` alone leaves same-second rows in
-    whatever order they happened to be read in, which is enough to make two
-    identical stores serialize differently."""
+    """Order deterministically, including rows updated in the same second."""
     return row.get("updated", ""), row.get("work_name", "")
 
 
 def _ordered(row: dict[str, Any]) -> dict[str, Any]:
-    """INDEX_ROW_ORDER first, then anything else in the order it arrived. An
-    unrecognised key is kept rather than dropped: reordering a row must never
-    be able to lose a field the schema has not been taught about yet."""
+    """Put known fields first without dropping unknown fields."""
     ordered = {key: row[key] for key in INDEX_ROW_ORDER if key in row}
     return ordered | {k: v for k, v in row.items() if k not in ordered}
 
@@ -438,22 +366,13 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is(row: dict[str, Any], work_name: str, cwd: str) -> bool:
-    """THE definition of "this row is that work item", for both the reader that
-    wants the row and the writer that must refuse a second one. Two spellings of
-    the rule would eventually disagree, and the disagreement that matters is a
-    create that sees no clash writing over a record a get can still find.
-
-    `cwd` must already be normalized. A hand-edited row with no cwd matches
-    nothing rather than raising: it has no place to be found in, and `validate`
-    is where it gets reported."""
+    """Match the sole identity; cwd must be normalized and missing cwd never matches."""
     return (row.get("work_name") == work_name and bool(row.get("cwd"))
             and normalize_cwd(row["cwd"]) == cwd)
 
 
 def _row_in(rows: list[dict[str, Any]], work_name: str, cwd: str) -> dict[str, Any]:
-    """Both halves of the key, and both are named on a miss: a name is only
-    unique within a directory, so a caller that drifted into a subdirectory
-    would otherwise read "no such work" and believe it."""
+    """Find both key halves, naming both on a miss."""
     for row in rows:
         if _is(row, work_name, cwd):
             return row

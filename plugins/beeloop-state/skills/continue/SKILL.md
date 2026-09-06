@@ -5,9 +5,6 @@ description: Pick work back up from the memory store. Use when the user says "/c
 
 # continue
 
-Take a description of what is being picked back up, find it, and return the
-context.
-
 ## Execution
 
 1. **Try the mechanical path first.** An agent knows the directory it is sitting
@@ -17,11 +14,12 @@ context.
    state_index_search(cwd="<the directory you are working in>", completion="open", limit=0)
    ```
 
-   If exactly one row matches what the user described, or there is only one open
-   item here, take it and go to step 3.
+   Complete `state_index_search`'s index stage. If exactly one row matches what
+   the user described, take it and go to step 3. For a generic resume request
+   with no description, take the sole open row if there is one.
 
 2. **If multiple candidates remain ambiguous, ask the contents.** Invoke
-   `beebot-state:state-ask` with what the user said they are picking back up.
+   `beeloop-state:state-ask` with what the user said they are picking back up.
    Always include `cwd`: it is half the key, not a hint. Include `since` only
    when the user requested it. This is a fallback, not the first move.
 
@@ -46,6 +44,5 @@ context.
    - `artifacts` — the durable references, so they can be followed
    - `description` — only if the work is unfamiliar
 
-5. **If the mechanical search returned no candidates**, say so plainly and
-   offer to start a record with `state_initialize`. Do not invent a work_name
-   and start writing to it.
+5. **If no row matches**, say so plainly and offer to start a record with
+   `state_initialize`. Do not invent a work_name and start writing to it.

@@ -5,10 +5,6 @@ description: List open work from the memory store. Use when the user says "/work
 
 # work
 
-Every open work item, formatted. This is one read of one file: the index carries
-identity, time and place, and `short_description` exists precisely so this
-listing does not have to open anything.
-
 ## Execution
 
 1. **The default listing** — everything open, everywhere:
@@ -42,7 +38,7 @@ listing does not have to open anything.
 4. **Do not open work files.** If the user then asks about one, `state_get` it,
    passing that row's `work_name` AND its `cwd`. If they ask a question ABOUT
    the work rather than for the list — "what's blocked on the deploy?" — invoke
-   `beebot-state:state-ask`.
+   `beeloop-state:state-ask`.
 
 5. If nothing comes back, say the store has no open work. Do not widen the
    filters and re-run without saying so.

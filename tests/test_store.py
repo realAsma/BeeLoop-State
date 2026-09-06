@@ -1,9 +1,4 @@
-"""The store itself -- no MCP.
-
-Each test is about a rule the store must not be able to break: the slug that has
-to stay injective, the validation that refuses rather than truncates, and the
-invariants schema.json cannot express.
-"""
+"""Test store invariants directly, without MCP."""
 
 from __future__ import annotations
 
@@ -17,8 +12,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "plugins" / "state" / "assets"
-sys.path.insert(0, str(ROOT / "plugins" / "state"))
+ASSETS = ROOT / "plugins" / "beeloop-state" / "assets"
+sys.path.insert(0, str(ROOT / "plugins" / "beeloop-state"))
 
 from core import store as store_mod  # noqa: E402
 from core.store import (  # noqa: E402
@@ -45,8 +40,7 @@ ONE, TWO = "/work/one", "/work/two"
 
 
 def bucket(cwd: str) -> str:
-    """Computed, never spelled out: the bucket name includes a digest of cwd,
-    and a test that hardcoded it would be asserting the digest, not the rule."""
+    """Compute bucket names so tests assert behavior, not a fixed digest."""
     return store_mod.slug(cwd)
 
 
@@ -149,7 +143,7 @@ def test_update_writes_both_files_in_one_call(store: Store, states: Path):
     store.initialize("t", "d", CWD)
     store.update("t", CWD, {"current_status": "halfway", "completion": "done"})
     assert json.loads((states / bucket(CWD) / "t.json").read_text())["current_status"] == "halfway"
-    assert store.row("t", CWD)["completion"] == "done"
+    assert store.read_index()[0]["completion"] == "done"
 
 
 def test_update_rejects_unknown_fields_rather_than_dropping_them(store: Store):
@@ -167,7 +161,7 @@ def test_update_refuses_identity_and_location(store: Store):
 
 def test_update_bumps_updated_strictly_even_within_one_second(store: Store):
     store.initialize("t", "d", CWD)
-    stamps = [store.row("t", CWD)["updated"],
+    stamps = [store.read_index()[0]["updated"],
               store.update("t", CWD, {"current_status": "a"}),
               store.update("t", CWD, {"current_status": "b"})]
     assert stamps == sorted(set(stamps))

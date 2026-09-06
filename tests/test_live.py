@@ -1,24 +1,20 @@
-"""The server as a host actually runs it: a subprocess speaking stdio JSON-RPC.
-
-test_store.py covers the store in-process. This covers the gap between "the
-function works" and "the tool works" -- where a schema mismatch, an
-unserializable return, or a missing annotation hides -- plus everything that is
-a property of the SERVER rather than the store: freshness, annotations, and
-initialization.
-"""
+"""Exercise the server as a host does: a subprocess speaking stdio JSON-RPC."""
 
 from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVER = ROOT / "plugins" / "state" / "server.py"
+SERVER = ROOT / "plugins" / "beeloop-state" / "server.py"
 # Half of the key, so every tool call but the search carries it.
 HERE = "/work/here"
 
@@ -35,6 +31,9 @@ class Session:
             [sys.executable, str(SERVER), "--states", str(states), *args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1)
+        self._stdout: queue.Queue[str | None] = queue.Queue()
+        self._reader = threading.Thread(target=self._read_stdout, daemon=True)
+        self._reader.start()
         self._id = 0
         self.request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
                                     "clientInfo": {"name": "test", "version": "0"}})
@@ -44,14 +43,32 @@ class Session:
         self.process.stdin.write(json.dumps(payload) + "\n")
         self.process.stdin.flush()
 
+    def _read_stdout(self) -> None:
+        for line in self.process.stdout:
+            self._stdout.put(line)
+        self._stdout.put(None)
+
     def request(self, method: str, params: dict | None = None) -> dict:
         self._id += 1
         self._send({"jsonrpc": "2.0", "id": self._id, "method": method, "params": params or {}})
-        while line := self.process.stdout.readline():
+        deadline = time.monotonic() + 10
+        while (remaining := deadline - time.monotonic()) > 0:
+            try:
+                line = self._stdout.get(timeout=remaining)
+            except queue.Empty:
+                break
+            if line is None:
+                self._abort("server died")
             message = json.loads(line)
             if message.get("id") == self._id:
                 return message
-        raise AssertionError(f"server died: {self.process.stderr.read()[-2000:]}")
+        self._abort(f"server did not answer {method!r} within 10 seconds")
+
+    def _abort(self, reason: str) -> None:
+        self.process.kill()
+        self.process.wait(timeout=5)
+        stderr = self.process.stderr.read()
+        raise AssertionError(f"{reason}: {stderr[-2000:]}")
 
     def tools(self) -> dict[str, dict]:
         return {t["name"]: t for t in self.request("tools/list")["result"]["tools"]}

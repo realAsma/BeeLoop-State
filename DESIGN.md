@@ -8,7 +8,7 @@ read once you have chosen. Recall is therefore two cheap steps rather than a
 scan: filter the rows, then open one file.
 
 ```text
-~/.beebot_states/
+~/.beeloop_states/
 ├── index.jsonl                        one row per work item — the search surface
 ├── schema.json                        validates every write
 └── home-you-projects-qwen35-recovery-4b1e9c07/   ← bucket = one workspace

@@ -25,34 +25,33 @@ codex plugin marketplace add /path/to/beeloop-state   # Codex
 codex plugin add beeloop-state@beeloop-state
 ```
 
-The store writes to `~/.beebot_states` by default.
+Configure the store before starting either plugin host:
 
-Codex also needs that directory in its sandbox (`~/.codex/config.toml`), then a
-restart:
+```sh
+./beeloop-state setup                         # defaults to ~/.beeloop_states
+./beeloop-state setup --state-dir /abs/path  # replaces the configured path
+```
+
+Setup writes the absolute path to `~/.config/beeloop/state.toml`. When no path
+is supplied it preserves an existing configuration, or writes the default when
+the file is missing. The server requires this file and does not select a store
+through command-line flags or environment variables.
+
+Codex also needs the configured directory in its sandbox
+(`~/.codex/config.toml`), then a restart:
 
 ```toml
 [sandbox_workspace_write]
-writable_roots = ["/home/you/.beebot_states"]
+writable_roots = ["/home/you/.beeloop_states"]
 ```
 
 <details>
 <summary>How do I change the memory location?</summary>
 
-Resolution order is `--states <dir>`, then `$BEEBOT_STATE_DIR`, then the
-`~/.beebot_states` default. Absolute paths are recommended. Relative paths
-resolve against the server's working directory; a relative `$BEEBOT_STATE_DIR`
-also produces a warning.
-
-To move it, either symlink `~/.beebot_states` at the directory you want
-(host-independent, survives upgrades), or set `BEEBOT_STATE_DIR` in an `env`
-block in the plugin's `mcp.json` (Codex) and `.mcp.json` (Claude Code):
-
-```json
-"env": { "BEEBOT_STATE_DIR": "/abs/path/to/states" }
-```
-
-Keep that machine-local path out of a shared checkout, and make sure Codex's
-`writable_roots` lists the same directory.
+Run `./beeloop-state setup --state-dir PATH`. Relative arguments are resolved
+against the current directory before being written to
+`~/.config/beeloop/state.toml`. Keep this machine-local file out of shared
+checkouts and make sure Codex's `writable_roots` lists the configured directory.
 
 Writes are schema-validated, freshness-checked, `flock`ed, and atomically
 renamed.

@@ -10,7 +10,6 @@ never spawn a model. `--validate` re-checks the store and exits.
 import argparse
 import filecmp
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +22,7 @@ try:
     from mcp.types import ToolAnnotations
     from pydantic import Field
 
+    from config import ConfigError, selected_state_dir, state_dir, write_state_dir
     from core.store import Filters, Store, StoreError
 except ImportError as exc:
     # `python3` resolves through whatever PATH the host process was launched
@@ -215,56 +215,34 @@ def _refuse_a_legacy_store(index: Path) -> None:
                 f"first: mv {index.parent} {index.parent}.archive")
 
 
-def resolve_states_dir(flag: Path | None) -> tuple[Path, str]:
-    """--states, then $BEEBOT_STATE_DIR, then ~/.beebot_states.
-
-    Ignores per-host data directories so every host uses one external store.
-    """
-    if flag is not None:
-        return _absolute(flag), "--states"
-    if given := os.environ.get("BEEBOT_STATE_DIR", "").strip():
-        resolved = _absolute(Path(given))
-        if not Path(given).expanduser().is_absolute():
-            # An MCP server's cwd is host-chosen, so a relative value lands
-            # somewhere the user did not pick. Allowed, but never silently.
-            print(f"state: $BEEBOT_STATE_DIR={given!r} is not absolute; "
-                  f"resolved against the current directory to {resolved}", file=sys.stderr)
-        return resolved, "$BEEBOT_STATE_DIR"
-    return Path.home() / ".beebot_states", "default"
-
-
-def _absolute(path: Path) -> Path:
-    """'~' expanded, relative resolved against cwd. '$VAR' is NOT expanded: a
-    literal '$' in a directory name is legal, and silently mangling it would
-    put the store somewhere the user cannot find."""
-    return path.expanduser().resolve()
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="state", description=__doc__)
-    parser.add_argument("--states", type=Path, default=None,
-                        help="the data directory "
-                             "(default: $BEEBOT_STATE_DIR, else ~/.beebot_states)")
+    parser = argparse.ArgumentParser(prog="beeloop-state", description=__doc__)
+    commands = parser.add_subparsers(dest="command")
+    setup = commands.add_parser("setup", help="configure and prepare the state store")
+    setup.add_argument("--state-dir", type=Path)
     parser.add_argument("--validate", action="store_true",
                         help="re-check the whole store and exit")
     args = parser.parse_args(argv)
 
     global STORE
     try:
-        states_dir, source = resolve_states_dir(args.states)
-    except RuntimeError as exc:
-        # Path.home() with HOME unset and no passwd entry: there is no default
-        # to fall back to, so say that rather than traceback.
-        print(f"state: cannot determine the data directory: {exc}", file=sys.stderr)
-        return 2
-    try:
+        if args.command == "setup":
+            states_dir, should_write = selected_state_dir(args.state_dir)
+        else:
+            states_dir, should_write = state_dir(), False
         STORE = Store(prepare(states_dir))
-    except (StoreError, OSError, RuntimeError) as exc:
-        print(f"state: cannot use {states_dir} (from {source}): {exc}", file=sys.stderr)
+        if should_write:
+            write_state_dir(states_dir)
+    except (ConfigError, StoreError, OSError, RuntimeError) as exc:
+        print(f"beeloop-state: {exc}", file=sys.stderr)
         return 2
     # stderr, never stdout: stdout is the JSON-RPC channel and a stray line
     # there corrupts the handshake.
-    print(f"state: store at {STORE.dir} (from {source})", file=sys.stderr)
+    print(f"beeloop-state: store at {STORE.dir}", file=sys.stderr)
+
+    if args.command == "setup":
+        print(f"BeeLoop State directory: {STORE.dir}")
+        return 0
 
     if args.validate:
         if problems := STORE.validate():

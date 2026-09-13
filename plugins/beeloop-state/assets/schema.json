@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://beebot.local/state-store/schema.json",
-  "title": "BeeBot state store",
+  "$id": "https://beeloop.local/state-store/schema.json",
+  "title": "BeeLoop state store",
   "description": "Startup schema for both record types; missing or invalid means every write is refused.",
 
   "$defs": {

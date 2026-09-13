@@ -27,10 +27,20 @@ class Session:
     """One server subprocess, driven over stdio."""
 
     def __init__(self, states: Path, *args: str):
+        self.home = states.parent / "home"
+        env = {**os.environ, "HOME": str(self.home)}
+        setup = subprocess.run(
+            [sys.executable, str(SERVER), "setup", "--state-dir", str(states)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        assert setup.returncode == 0, setup.stderr
         self.process = subprocess.Popen(
-            [sys.executable, str(SERVER), "--states", str(states), *args],
+            [sys.executable, str(SERVER), *args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1)
+            text=True, bufsize=1, env=env)
         self._stdout: queue.Queue[str | None] = queue.Queue()
         self._reader = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader.start()
@@ -124,73 +134,79 @@ def test_the_server_seeds_its_own_data_directory(sessions, states: Path):
 
 
 def _validate(*args: str, cwd: Path | None = None, **env: str) -> subprocess.CompletedProcess:
-    """--validate prints the resolved directory on stdout and names the rung on
-    stderr, so it is the cheapest way to interrogate the ladder."""
+    """Run the server CLI with an isolated environment."""
     return subprocess.run([sys.executable, str(SERVER), *args, "--validate"],
                           capture_output=True, text=True, timeout=60,
                           cwd=None if cwd is None else str(cwd), env={**os.environ, **env})
 
 
-def test_the_default_is_beebot_states_under_home(tmp_path: Path):
-    done = _validate(HOME=str(tmp_path))
+def _setup(*args: str, cwd: Path | None = None, **env: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SERVER), "setup", *args],
+                          capture_output=True, text=True, timeout=60,
+                          cwd=None if cwd is None else str(cwd), env={**os.environ, **env})
+
+
+def test_setup_writes_the_default_under_home(tmp_path: Path):
+    done = _setup(HOME=str(tmp_path))
     assert done.returncode == 0
-    assert str((tmp_path / ".beebot_states").resolve()) in done.stdout
-    assert "(from default)" in done.stderr
+    wanted = (tmp_path / ".beeloop_states").resolve()
+    assert str(wanted) in done.stdout
+    assert (wanted / "schema.json").is_file()
+    assert f'state_dir = "{wanted}"' in (
+        tmp_path / ".config" / "beeloop" / "state.toml"
+    ).read_text("utf-8")
 
 
-def test_the_env_var_overrides_the_default(tmp_path: Path):
+def test_explicit_state_dir_overwrites_configuration(tmp_path: Path):
     wanted = tmp_path / "elsewhere"
-    done = _validate(HOME=str(tmp_path), BEEBOT_STATE_DIR=str(wanted))
+    assert _setup(HOME=str(tmp_path)).returncode == 0
+    done = _setup("--state-dir", str(wanted), HOME=str(tmp_path))
     assert done.returncode == 0
     assert str(wanted.resolve()) in done.stdout
-    assert not (tmp_path / ".beebot_states").exists()
+    assert str(wanted.resolve()) in (
+        tmp_path / ".config" / "beeloop" / "state.toml"
+    ).read_text("utf-8")
 
 
-def test_the_flag_beats_the_env_var(tmp_path: Path):
-    # A manifest that passes --states would silently disable the user's
-    # $BEEBOT_STATE_DIR, which is why neither of ours does.
-    wanted = tmp_path / "flag"
-    done = _validate("--states", str(wanted),
-                     HOME=str(tmp_path), BEEBOT_STATE_DIR=str(tmp_path / "env"))
+def test_omitted_state_dir_preserves_configuration(tmp_path: Path):
+    wanted = tmp_path / "configured"
+    assert _setup("--state-dir", str(wanted), HOME=str(tmp_path)).returncode == 0
+    done = _setup(HOME=str(tmp_path))
     assert done.returncode == 0
     assert str(wanted.resolve()) in done.stdout
-    assert "(from --states)" in done.stderr
 
 
-def test_a_blank_env_var_falls_back_rather_than_using_the_cwd(tmp_path: Path):
-    done = _validate(HOME=str(tmp_path), BEEBOT_STATE_DIR="   ")
+def test_relative_setup_path_is_stored_as_absolute(tmp_path: Path):
+    done = _setup("--state-dir", "relative", cwd=tmp_path, HOME=str(tmp_path / "home"))
     assert done.returncode == 0
-    assert str((tmp_path / ".beebot_states").resolve()) in done.stdout
+    assert str((tmp_path / "relative").resolve()) in done.stdout
 
 
-def test_a_tilde_in_the_env_var_is_expanded(tmp_path: Path):
-    # A JSON env block expands nothing, and neither does argparse.
-    done = _validate(HOME=str(tmp_path), BEEBOT_STATE_DIR="~/somewhere")
-    assert done.returncode == 0
-    assert str((tmp_path / "somewhere").resolve()) in done.stdout
+def test_startup_requires_valid_configuration(tmp_path: Path):
+    done = _validate(HOME=str(tmp_path), BEEBOT_STATE_DIR=str(tmp_path / "ignored"))
+    assert done.returncode == 2
+    assert "beeloop-state setup" in done.stderr
 
+    config = tmp_path / ".config" / "beeloop" / "state.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("state_dir = [broken", encoding="utf-8")
+    done = _validate(HOME=str(tmp_path))
+    assert done.returncode == 2
+    assert str(config) in done.stderr
 
-def test_a_relative_env_var_is_resolved_and_said_so(tmp_path: Path):
-    done = _validate(cwd=tmp_path, HOME=str(tmp_path), BEEBOT_STATE_DIR="relative/dir")
-    assert done.returncode == 0
-    assert str((tmp_path / "relative" / "dir").resolve()) in done.stdout
-    assert "not absolute" in done.stderr
-
-
-def test_no_host_data_directory_is_honoured(tmp_path: Path):
-    # The point of the whole arrangement: one store, not one per host.
-    done = _validate(HOME=str(tmp_path),
-                     PLUGIN_DATA=str(tmp_path / "codex"),
-                     CLAUDE_PLUGIN_DATA=str(tmp_path / "claude"))
-    assert done.returncode == 0
-    assert str((tmp_path / ".beebot_states").resolve()) in done.stdout
-    assert not (tmp_path / "codex").exists() and not (tmp_path / "claude").exists()
+    for body in ("other = 1\n", 'state_dir = "relative"\n'):
+        config.write_text(body, encoding="utf-8")
+        done = _validate(HOME=str(tmp_path))
+        assert done.returncode == 2
+        assert "state_dir" in done.stderr
 
 
 def test_the_resolved_directory_is_announced_on_stderr(states: Path):
     # stdout is the JSON-RPC channel; a stray line there breaks the handshake.
-    done = _validate("--states", str(states))
-    assert f"state: store at {states.resolve()} (from --states)" in done.stderr
+    home = states.parent / "home"
+    assert _setup("--state-dir", str(states), HOME=str(home)).returncode == 0
+    done = _validate(HOME=str(home))
+    assert f"beeloop-state: store at {states.resolve()}" in done.stderr
 
 
 def test_a_pre_3_0_store_is_refused_rather_than_appended_to(states: Path):
@@ -201,7 +217,7 @@ def test_a_pre_3_0_store_is_refused_rather_than_appended_to(states: Path):
         "task_name": "old", "task_state_path": "b/old.json", "cwd": "/w",
         "short_description": "d", "updated": "2026-01-01T00:00:00Z",
         "completion": "open"}) + "\n")
-    done = _validate("--states", str(states))
+    done = _setup("--state-dir", str(states), HOME=str(states.parent / "home"))
     assert done.returncode == 2
     assert "pre-3.0 store" in done.stderr and str(states) in done.stderr
 
@@ -338,6 +354,7 @@ def test_initialize_returns_the_first_token_and_update_returns_the_next(sessions
 
 
 def test_validate_runs_as_a_flag_not_a_tool(states: Path):
-    done = subprocess.run([sys.executable, str(SERVER), "--states", str(states), "--validate"],
-                          capture_output=True, text=True, timeout=60)
+    home = states.parent / "home"
+    assert _setup("--state-dir", str(states), HOME=str(home)).returncode == 0
+    done = _validate(HOME=str(home))
     assert done.returncode == 0 and "no problems" in done.stdout

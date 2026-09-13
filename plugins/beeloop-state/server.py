@@ -22,7 +22,7 @@ try:
     from mcp.types import ToolAnnotations
     from pydantic import Field
 
-    from config import ConfigError, selected_state_dir, state_dir, write_state_dir
+    from config import ConfigError, state_dir
     from core.store import Filters, Store, StoreError
 except ImportError as exc:
     # `python3` resolves through whatever PATH the host process was launched
@@ -217,32 +217,20 @@ def _refuse_a_legacy_store(index: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="beeloop-state", description=__doc__)
-    commands = parser.add_subparsers(dest="command")
-    setup = commands.add_parser("setup", help="configure and prepare the state store")
-    setup.add_argument("--state-dir", type=Path)
     parser.add_argument("--validate", action="store_true",
                         help="re-check the whole store and exit")
     args = parser.parse_args(argv)
 
     global STORE
     try:
-        if args.command == "setup":
-            states_dir, should_write = selected_state_dir(args.state_dir)
-        else:
-            states_dir, should_write = state_dir(), False
+        states_dir = state_dir()
         STORE = Store(prepare(states_dir))
-        if should_write:
-            write_state_dir(states_dir)
     except (ConfigError, StoreError, OSError, RuntimeError) as exc:
         print(f"beeloop-state: {exc}", file=sys.stderr)
         return 2
     # stderr, never stdout: stdout is the JSON-RPC channel and a stray line
     # there corrupts the handshake.
     print(f"beeloop-state: store at {STORE.dir}", file=sys.stderr)
-
-    if args.command == "setup":
-        print(f"BeeLoop State directory: {STORE.dir}")
-        return 0
 
     if args.validate:
         if problems := STORE.validate():

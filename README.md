@@ -25,38 +25,24 @@ codex plugin marketplace add /path/to/beeloop-state   # Codex
 codex plugin add beeloop-state@beeloop-state
 ```
 
-Configure the store before starting either plugin host:
+By default, the store lives at `~/.beeloop_states`. To change it, create a
+configuration file before starting either plugin host:
 
-```sh
-./beeloop-state setup                         # defaults to ~/.beeloop_states
-./beeloop-state setup --state-dir /abs/path  # replaces the configured path
+```bash
+mkdir -p "$HOME/.config/beeloop"
+cat > "$HOME/.config/beeloop/state.toml" <<EOF
+state_dir = "$HOME/my-beeloop-states"
+EOF
 ```
 
-Setup writes the absolute path to `~/.config/beeloop/state.toml`. When no path
-is supplied it preserves an existing configuration, or writes the default when
-the file is missing. The server requires this file and does not select a store
-through command-line flags or environment variables.
-
-Codex also needs the configured directory in its sandbox
-(`~/.codex/config.toml`), then a restart:
+In Workspace-Write mode, Codex may not be able to update state files unless the
+configured state directory is in `sandbox_workspace_write.writable_roots`.
+Grant that permission in `~/.codex/config.toml`, then restart Codex:
 
 ```toml
 [sandbox_workspace_write]
-writable_roots = ["/home/you/.beeloop_states"]
+writable_roots = ["/home/you/my-beeloop-states"]
 ```
-
-<details>
-<summary>How do I change the memory location?</summary>
-
-Run `./beeloop-state setup --state-dir PATH`. Relative arguments are resolved
-against the current directory before being written to
-`~/.config/beeloop/state.toml`. Keep this machine-local file out of shared
-checkouts and make sure Codex's `writable_roots` lists the configured directory.
-
-Writes are schema-validated, freshness-checked, `flock`ed, and atomically
-renamed.
-
-</details>
 
 ## Demo
 

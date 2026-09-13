@@ -29,14 +29,7 @@ class Session:
     def __init__(self, states: Path, *args: str):
         self.home = states.parent / "home"
         env = {**os.environ, "HOME": str(self.home)}
-        setup = subprocess.run(
-            [sys.executable, str(SERVER), "setup", "--state-dir", str(states)],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=env,
-        )
-        assert setup.returncode == 0, setup.stderr
+        _configure(self.home, states)
         self.process = subprocess.Popen(
             [sys.executable, str(SERVER), *args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -140,55 +133,30 @@ def _validate(*args: str, cwd: Path | None = None, **env: str) -> subprocess.Com
                           cwd=None if cwd is None else str(cwd), env={**os.environ, **env})
 
 
-def _setup(*args: str, cwd: Path | None = None, **env: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(SERVER), "setup", *args],
-                          capture_output=True, text=True, timeout=60,
-                          cwd=None if cwd is None else str(cwd), env={**os.environ, **env})
+def _configure(home: Path, states: Path) -> None:
+    config = home / ".config" / "beeloop" / "state.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'state_dir = "{states.resolve()}"\n', encoding="utf-8")
 
 
-def test_setup_writes_the_default_under_home(tmp_path: Path):
-    done = _setup(HOME=str(tmp_path))
-    assert done.returncode == 0
+def test_startup_prepares_the_configured_store(tmp_path: Path):
     wanted = (tmp_path / ".beeloop_states").resolve()
-    assert str(wanted) in done.stdout
+    _configure(tmp_path, wanted)
+
+    done = _validate(HOME=str(tmp_path))
+
+    assert done.returncode == 0
     assert (wanted / "schema.json").is_file()
-    assert f'state_dir = "{wanted}"' in (
-        tmp_path / ".config" / "beeloop" / "state.toml"
-    ).read_text("utf-8")
+    assert (wanted / "index.jsonl").is_file()
 
 
-def test_explicit_state_dir_overwrites_configuration(tmp_path: Path):
-    wanted = tmp_path / "elsewhere"
-    assert _setup(HOME=str(tmp_path)).returncode == 0
-    done = _setup("--state-dir", str(wanted), HOME=str(tmp_path))
-    assert done.returncode == 0
-    assert str(wanted.resolve()) in done.stdout
-    assert str(wanted.resolve()) in (
-        tmp_path / ".config" / "beeloop" / "state.toml"
-    ).read_text("utf-8")
-
-
-def test_omitted_state_dir_preserves_configuration(tmp_path: Path):
-    wanted = tmp_path / "configured"
-    assert _setup("--state-dir", str(wanted), HOME=str(tmp_path)).returncode == 0
-    done = _setup(HOME=str(tmp_path))
-    assert done.returncode == 0
-    assert str(wanted.resolve()) in done.stdout
-
-
-def test_relative_setup_path_is_stored_as_absolute(tmp_path: Path):
-    done = _setup("--state-dir", "relative", cwd=tmp_path, HOME=str(tmp_path / "home"))
-    assert done.returncode == 0
-    assert str((tmp_path / "relative").resolve()) in done.stdout
-
-
-def test_startup_requires_valid_configuration(tmp_path: Path):
+def test_startup_defaults_and_requires_valid_configuration(tmp_path: Path):
     done = _validate(HOME=str(tmp_path), BEEBOT_STATE_DIR=str(tmp_path / "ignored"))
-    assert done.returncode == 2
-    assert "beeloop-state setup" in done.stderr
+    assert done.returncode == 0
+    assert (tmp_path / ".beeloop_states" / "schema.json").is_file()
 
     config = tmp_path / ".config" / "beeloop" / "state.toml"
-    config.parent.mkdir(parents=True)
+    config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("state_dir = [broken", encoding="utf-8")
     done = _validate(HOME=str(tmp_path))
     assert done.returncode == 2
@@ -204,7 +172,7 @@ def test_startup_requires_valid_configuration(tmp_path: Path):
 def test_the_resolved_directory_is_announced_on_stderr(states: Path):
     # stdout is the JSON-RPC channel; a stray line there breaks the handshake.
     home = states.parent / "home"
-    assert _setup("--state-dir", str(states), HOME=str(home)).returncode == 0
+    _configure(home, states)
     done = _validate(HOME=str(home))
     assert f"beeloop-state: store at {states.resolve()}" in done.stderr
 
@@ -217,7 +185,9 @@ def test_a_pre_3_0_store_is_refused_rather_than_appended_to(states: Path):
         "task_name": "old", "task_state_path": "b/old.json", "cwd": "/w",
         "short_description": "d", "updated": "2026-01-01T00:00:00Z",
         "completion": "open"}) + "\n")
-    done = _setup("--state-dir", str(states), HOME=str(states.parent / "home"))
+    home = states.parent / "home"
+    _configure(home, states)
+    done = _validate(HOME=str(home))
     assert done.returncode == 2
     assert "pre-3.0 store" in done.stderr and str(states) in done.stderr
 
@@ -355,6 +325,6 @@ def test_initialize_returns_the_first_token_and_update_returns_the_next(sessions
 
 def test_validate_runs_as_a_flag_not_a_tool(states: Path):
     home = states.parent / "home"
-    assert _setup("--state-dir", str(states), HOME=str(home)).returncode == 0
+    _configure(home, states)
     done = _validate(HOME=str(home))
     assert done.returncode == 0 and "no problems" in done.stdout

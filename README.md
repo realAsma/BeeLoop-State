@@ -20,14 +20,14 @@ Requires `python3 -m pip install mcp 'jsonschema>=4'`.
 ### Codex setup
 
 ```sh
-codex plugin marketplace add git@github.com:realAsma/BeeBot-State.git
+codex plugin marketplace add git@github.com:realAsma/BeeLoop-State.git
 codex plugin add beeloop-state@beeloop-state
 ```
 
 ### Claude setup
 
 ```sh
-claude plugin marketplace add git@github.com:realAsma/BeeBot-State.git
+claude plugin marketplace add git@github.com:realAsma/BeeLoop-State.git
 claude plugin install beeloop-state@beeloop-state
 ```
 

@@ -17,12 +17,18 @@ latest `write_token` returned by `state_get`, `state_initialize`, or
 
 Requires `python3 -m pip install mcp 'jsonschema>=4'`.
 
-```sh
-/plugin marketplace add /path/to/beeloop-state   # Claude Code; also owner/repo or Git URL
-/plugin install beeloop-state@beeloop-state
+### Codex setup
 
-codex plugin marketplace add /path/to/beeloop-state   # Codex
+```sh
+codex plugin marketplace add /path/to/beeloop-state
 codex plugin add beeloop-state@beeloop-state
+```
+
+### Claude setup
+
+```sh
+claude plugin marketplace add /path/to/beeloop-state
+claude plugin install beeloop-state@beeloop-state
 ```
 
 By default, the store lives at `~/.beeloop_states`. To change it, create a

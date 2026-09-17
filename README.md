@@ -31,6 +31,11 @@ claude plugin marketplace add git@github.com:realAsma/BeeLoop-State.git
 claude plugin install beeloop-state@beeloop-state
 ```
 
+### Configuring the Root Folder for Memory Files (Optional)
+
+<details>
+<summary>Use a custom memory root</summary>
+
 By default, the store lives at `~/.beeloop_states`. To change it, create a
 configuration file before starting either plugin host:
 
@@ -49,6 +54,8 @@ Grant that permission in `~/.codex/config.toml`, then restart Codex:
 [sandbox_workspace_write]
 writable_roots = ["/home/you/my-beeloop-states"]
 ```
+
+</details>
 
 ## Demo
 

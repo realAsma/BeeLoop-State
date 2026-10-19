@@ -54,9 +54,8 @@ one work item for a reader who was not present.
    Keep saved prose concise yet readable, preserving normal word spacing. Do
    not drop whitespace to fit field limits; use step 7 for overflow.
 
-   For remote artifact paths, add `machine` with the host or SSH alias, keeping
-   the path in `item`. Omit `machine` for paths local to the saving workspace
-   and machine; leave URLs unchanged.
+   For remote artifact paths, set `machine` to the host or SSH alias. Use the
+   [schema](../../assets/schema.json) for artifact fields and limits.
 
 5. **If the work is finished**, add `completion="done"` and write
    `final_learnings` for somebody facing the same problem on different work,

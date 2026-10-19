@@ -70,7 +70,5 @@ is optional and usually written once at the end.
 what stops the next session repeating a day you already spent. `artifacts` holds
 durable references only; the content they point at lives elsewhere.
 
-An artifact's optional `machine` identifies the remote host or SSH alias for a
-filesystem path in `item`. Without it, paths are local to the saving workspace
-and machine. URLs remain unchanged. The optional `note` explains the reference
-in at most 2000 characters.
+See the [schema](plugins/beeloop-state/assets/schema.json) for record fields
+and limits.

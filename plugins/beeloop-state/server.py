@@ -18,8 +18,9 @@ from typing import Annotated, Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
-    from mcp.server.fastmcp import FastMCP
-    from mcp.types import ToolAnnotations
+    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
+    from mcp_types import ToolAnnotations
     from pydantic import Field
 
     from config import ConfigError, state_dir
@@ -32,7 +33,8 @@ except ImportError as exc:
     print(f"state: {exc}\n"
           f"state: this interpreter is {sys.executable}\n"
           f"state: install the dependencies there with "
-          f"`{sys.executable} -m pip install mcp 'jsonschema>=4'`", file=sys.stderr)
+          f"`{sys.executable} -m pip install 'mcp>=2,<3' 'jsonschema>=4'`",
+          file=sys.stderr)
     raise SystemExit(2) from exc
 
 HERE = Path(__file__).resolve().parent
@@ -47,7 +49,7 @@ CREATE = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                          idempotentHint=False, openWorldHint=False)
 UPDATE = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                          idempotentHint=False, openWorldHint=False)
-mcp = FastMCP("state", instructions="""Long-term state for long-running work.
+mcp = MCPServer("state", instructions="""Long-term state for long-running work.
 
 A work item has a searchable index row and a prose work file.
 
@@ -79,7 +81,10 @@ def state_get(work_name: str, cwd: str) -> dict:
         cwd: The directory it runs in. Required: it is the other half of the
             key, so the same name in another directory is a different record.
     """
-    record = STORE.get(work_name, cwd)
+    try:
+        record = STORE.get(work_name, cwd)
+    except StoreError as exc:
+        raise ToolError(str(exc)) from exc
     return {**record, "write_token": record["updated"]}
 
 
@@ -111,8 +116,11 @@ def state_index_search(
         cwd: Exact working-directory filter, not a prefix.
         limit: Maximum rows returned; pass 0 for an exhaustive sweep.
     """
-    return STORE.search(Filters(since=since, until=until, completion=completion,
-                                cwd=cwd, limit=limit))
+    try:
+        return STORE.search(Filters(since=since, until=until, completion=completion,
+                                    cwd=cwd, limit=limit))
+    except StoreError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 @mcp.tool(annotations=CREATE)
@@ -128,7 +136,10 @@ def state_initialize(work_name: str, short_description: str, cwd: str) -> dict:
         short_description: One-line summary, at most 120 characters.
         cwd: The work's real directory; half the immutable key.
     """
-    row = STORE.initialize(work_name, short_description, cwd)
+    try:
+        row = STORE.initialize(work_name, short_description, cwd)
+    except StoreError as exc:
+        raise ToolError(str(exc)) from exc
     return {"work_name": row["work_name"], "cwd": row["cwd"],
             "write_token": row["updated"]}
 
@@ -183,7 +194,10 @@ def state_update(
              "final_learnings": final_learnings, "completion": completion,
              "short_description": short_description}
     fields = {key: value for key, value in given.items() if value is not None}
-    updated = STORE.update(work_name, cwd, fields, expected=write_token)
+    try:
+        updated = STORE.update(work_name, cwd, fields, expected=write_token)
+    except StoreError as exc:
+        raise ToolError(str(exc)) from exc
     return {"updated": updated, "write_token": updated}
 
 

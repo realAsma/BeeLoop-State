@@ -6,7 +6,7 @@ Both hosts share one store, so work saved in one resumes in the other.
 
 ## Install
 
-Requires `python3 -m pip install mcp 'jsonschema>=4'`.
+Requires `python3 -m pip install 'mcp>=2,<3' 'jsonschema>=4'`.
 
 ### Codex setup
 

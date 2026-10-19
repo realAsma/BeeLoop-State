@@ -181,7 +181,8 @@ def state_update(
         next_steps: Concrete enough for the next person to begin without asking
             questions.
         blockers: Who or what is being waited on.
-        artifacts: Needed paths, links, commits, or job IDs, each with a note.
+        artifacts: Needed paths, links, commits, or job IDs. See
+            assets/schema.json for artifact fields and limits.
         final_learnings: Lessons for somebody facing the same problem on
             different work, usually written at the end.
         completion: "open" or "done".

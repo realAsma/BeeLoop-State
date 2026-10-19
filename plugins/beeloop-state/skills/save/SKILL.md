@@ -51,6 +51,12 @@ one work item for a reader who was not present.
    learned from a colleague in the appropriate fields. If it is absent from the
    record, it does not survive.
 
+   Keep saved prose concise yet readable, preserving normal word spacing. Do
+   not drop whitespace to fit field limits; use step 7 for overflow.
+
+   For remote artifact paths, set `machine` to the host or SSH alias. Use the
+   [schema](../../assets/schema.json) for artifact fields and limits.
+
 5. **If the work is finished**, add `completion="done"` and write
    `final_learnings` for somebody facing the same problem on different work,
    rather than the successor served by `prior_actions`.

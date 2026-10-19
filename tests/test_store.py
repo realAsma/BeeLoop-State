@@ -210,12 +210,22 @@ def test_list_item_string_limits_report_the_index(store: Store, field: str, limi
 
 def test_artifact_note_limit_reports_counts(store: Store):
     store.initialize("t", "d", CWD)
-    store.update("t", CWD, {"artifacts": [{"item": "commit:abc", "note": "x" * 600}]})
+    artifact = {"item": "commit:abc", "note": "x" * 2000}
+    store.update("t", CWD, {"artifacts": [artifact]})
+    assert store.get("t", CWD)["artifacts"] == [artifact]
     with pytest.raises(
             Invalid,
-            match=r"artifacts\.0\.note is too long \(601 > 600 characters\)",
+            match=r"artifacts\.0\.note is too long \(2,001 > 2,000 characters\)",
     ):
-        store.update("t", CWD, {"artifacts": [{"item": "commit:abc", "note": "x" * 601}]})
+        store.update("t", CWD, {"artifacts": [{"item": "commit:abc", "note": "x" * 2001}]})
+    assert store.get("t", CWD)["artifacts"] == [artifact]
+
+
+@pytest.mark.parametrize("machine", ["", None, 42])
+def test_artifact_machine_requires_a_nonempty_string(store: Store, machine):
+    store.initialize("t", "d", CWD)
+    with pytest.raises(Invalid, match=r"artifacts\.0\.machine"):
+        store.update("t", CWD, {"artifacts": [{"item": "/scratch/run", "machine": machine}]})
 
 
 @pytest.mark.parametrize(("field", "limit", "item"), [

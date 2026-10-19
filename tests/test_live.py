@@ -197,21 +197,27 @@ def test_a_pre_3_0_store_is_refused_rather_than_appended_to(states: Path):
 
 def test_work_can_be_created_filled_and_found(sessions):
     session = sessions()
+    artifacts = [
+        {"item": "server.py", "note": "the four tools"},
+        {"item": "/scratch/run", "note": "Remote validation log.", "machine": "gpu-worker"},
+        {"item": "https://example.test/run"},
+    ]
     initialized = session.call("state_initialize", work_name="build-store", cwd=HERE,
                                short_description="Build the memory store")
     session.call("state_update", work_name="build-store", cwd=HERE,
                  write_token=initialized["write_token"],
                  current_status="Core and server done.",
                  prior_actions=["Tried deriving the bucket at read time; it has to stay stored."],
-                 artifacts=[{"item": "server.py", "note": "the four tools"}])
+                 artifacts=artifacts)
 
     assert [r["work_name"] for r in
             session.call("state_index_search", cwd=HERE, completion="open", limit=0)] \
         == ["build-store"]
 
-    record = session.call("state_get", work_name="build-store", cwd=HERE)
+    record = sessions().call("state_get", work_name="build-store", cwd=HERE)
     assert record["current_status"] == "Core and server done."
     assert record["short_description"] == "Build the memory store"
+    assert record["artifacts"] == artifacts
     assert "work_state_path" not in record  # filing never leaves the store
 
 

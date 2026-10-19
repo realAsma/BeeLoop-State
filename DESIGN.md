@@ -55,7 +55,10 @@ named leaves old rows resolvable.
   ],
   "next_steps": ["Re-run MBPP with the fixed template, then sweep LR 1e-5 to 5e-5 at rank 32."],
   "blockers": ["MBPP numbers untrustworthy until the harness fix lands."],
-  "artifacts": [{"item": "runs/qwen35_9b_lora_r32/checkpoint-1200", "note": "Best checkpoint so far."}],
+  "artifacts": [
+    {"item": "eval-summary.md", "note": "Local evaluation summary."},
+    {"item": "/scratch/runs/qwen35_9b_lora_r32/checkpoint-1200", "note": "Best checkpoint so far.", "machine": "gpu-worker"}
+  ],
   "final_learnings": "Verify the eval harness before blaming the fine-tune."
 }
 ```
@@ -66,3 +69,8 @@ is optional and usually written once at the end.
 `prior_actions` carries the dead ends — the most valuable field, because it is
 what stops the next session repeating a day you already spent. `artifacts` holds
 durable references only; the content they point at lives elsewhere.
+
+An artifact's optional `machine` identifies the remote host or SSH alias for a
+filesystem path in `item`. Without it, paths are local to the saving workspace
+and machine. URLs remain unchanged. The optional `note` explains the reference
+in at most 2000 characters.

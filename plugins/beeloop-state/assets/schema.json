@@ -109,8 +109,13 @@
               },
               "note": {
                 "type": "string",
-                "maxLength": 600,
+                "maxLength": 2000,
                 "description": "What it is and why it matters."
+              },
+              "machine": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional remote host or SSH alias for a filesystem path. Omit for paths local to the saving workspace and machine; URLs remain unchanged."
               }
             }
           }

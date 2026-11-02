@@ -10,10 +10,9 @@ one work item for a reader who was not present.
 
 ## Index summary
 
-Write a concise, high-level summary so a reader can quickly understand and
-locate this work from the index. Update it as the work evolves or its focus
-changes. Keep detailed status and handoff history in the full record. Limit the
-summary to 120 characters.
+Write a concise, self-contained summary in a few sentences so a reader can
+quickly understand and locate the work. Update it as the work evolves. Keep
+detailed status and handoff history in the full record.
 
 For example, when the work produces a PR:
 
@@ -49,7 +48,7 @@ For example, when the work produces a PR:
    ```
    state_initialize(work_name="<slug>",
                     cwd="<the directory you are working in>",
-                    short_description="<one line, at most 120 characters>")
+                    short_description="<concise, self-contained work summary>")
    ```
 
    `cwd` is half the key and is set here or never. Both `state_get` and

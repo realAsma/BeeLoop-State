@@ -38,8 +38,8 @@
         "short_description": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 120,
-          "description": "One-line recall summary, avoiding work-file reads during search."
+          "maxLength": 400,
+          "description": "Concise, self-contained work summary, avoiding work-file reads during search."
         },
         "updated": {
           "$ref": "#/$defs/timestamp",

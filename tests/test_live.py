@@ -262,9 +262,20 @@ def test_tools_declare_annotations(sessions):
     assert tools["state_initialize"]["annotations"]["destructiveHint"] is False
 
 
-def test_a_violation_reaches_the_client_as_a_readable_error(sessions):
-    with pytest.raises(ToolFailed, match=r"short_description.*147 > 120"):
-        sessions().call("state_initialize", work_name="t", cwd=HERE, short_description="x" * 147)
+def test_summary_limit_reaches_the_client_for_initialize_and_update(sessions):
+    session = sessions()
+    initialized = session.call("state_initialize", work_name="t", cwd=HERE,
+                               short_description="x" * 400)
+    assert session.call("state_get", work_name="t", cwd=HERE)["short_description"] == "x" * 400
+    with pytest.raises(ToolFailed, match=r"short_description.*401 > 400"):
+        session.call("state_initialize", work_name="too-long", cwd=HERE,
+                     short_description="x" * 401)
+    updated = session.call("state_update", work_name="t", cwd=HERE,
+                           write_token=initialized["write_token"], short_description="y" * 400)
+    with pytest.raises(ToolFailed, match=r"short_description.*401 > 400"):
+        session.call("state_update", work_name="t", cwd=HERE,
+                     write_token=updated["write_token"], short_description="y" * 401)
+    assert session.call("state_get", work_name="t", cwd=HERE)["short_description"] == "y" * 400
 
 
 def test_an_unknown_field_is_rejected_not_dropped(sessions):

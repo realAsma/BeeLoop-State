@@ -133,7 +133,8 @@ def state_initialize(work_name: str, short_description: str, cwd: str) -> dict:
         work_name: Names the work within `cwd`; those two together are the key.
             Lowercase-hyphenated is the convention. Also the filename stem, so
             no path separators and no leading '.', '_' or '-'.
-        short_description: One-line summary, at most 120 characters.
+        short_description: Concise, self-contained work summary in a few
+            sentences for quick index recognition.
         cwd: The work's real directory; half the immutable key.
     """
     try:
@@ -185,8 +186,9 @@ def state_update(
         final_learnings: Lessons for somebody facing the same problem on
             different work, usually written at the end.
         completion: "open" or "done".
-        short_description: Replace the index one-liner only when it no longer
-            fits the work. At most 120 characters.
+        short_description: Concise, self-contained work summary in a few
+            sentences for quick index recognition. Refresh it when unclear or
+            as the work evolves.
     """
     given = {"description": description, "current_status": current_status,
              "prior_actions": prior_actions, "next_steps": next_steps,

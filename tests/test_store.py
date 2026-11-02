@@ -131,9 +131,15 @@ def test_initialize_refuses_a_missing_cwd(store: Store):
             store.initialize("t", "d", bad)
 
 
-def test_a_violation_names_the_field_the_rule_and_the_numbers(store: Store):
-    with pytest.raises(Invalid, match=r"short_description.*\(147 > 120 characters\)"):
-        store.initialize("t", "x" * 147, CWD)
+def test_summary_limit_applies_to_initialize_and_update(store: Store):
+    store.initialize("t", "x" * 400, CWD)
+    assert store.read_index()[0]["short_description"] == "x" * 400
+    with pytest.raises(Invalid, match=r"short_description.*\(401 > 400 characters\)"):
+        store.initialize("too-long", "x" * 401, CWD)
+    store.update("t", CWD, {"short_description": "y" * 400})
+    with pytest.raises(Invalid, match=r"short_description.*\(401 > 400 characters\)"):
+        store.update("t", CWD, {"short_description": "y" * 401})
+    assert store.read_index()[0]["short_description"] == "y" * 400
 
 
 # ------------------------------------------------------------------- update

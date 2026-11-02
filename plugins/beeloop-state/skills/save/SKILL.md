@@ -8,6 +8,18 @@ description: Write the current work state to the memory store, for a reader who 
 **Assume the conversation is lost.** Persist a self-contained account in its
 one work item for a reader who was not present.
 
+## Index summary
+
+Write a concise, high-level summary so a reader can quickly understand and
+locate this work from the index. Update it as the work evolves or its focus
+changes. Keep detailed status and handoff history in the full record. Limit the
+summary to 120 characters.
+
+For example, when the work produces a PR:
+
+1. **Not helpful:** `PR #123 work`
+2. **Helpful:** `Add retries for failed payment requests (PR acme/api#123)`
+
 ## Execution
 
 1. **Find the work item, mechanically first.**
@@ -45,7 +57,8 @@ one work item for a reader who was not present.
    a record you just initialized.
 
 4. **Write the content, in one call.** Merge with what step 3 returned and
-   follow `state_update`'s field contract.
+   follow `state_update`'s field contract. Refresh `short_description` if it is
+   unclear or no longer describes the work.
 
    Persist every context-only assumption, rejected-approach rationale, and fact
    learned from a colleague in the appropriate fields. If it is absent from the
